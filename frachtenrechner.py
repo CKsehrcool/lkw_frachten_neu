@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from utils import calculate_freight, load_tariff_data, load_nk_data
+from utils import calculate_freight
 
 # Daten laden
 dsv_data = pd.read_excel("dsv.xlsx", sheet_name=None)
