@@ -1,69 +1,52 @@
 import streamlit as st
+from utils import calculate_freight
 import pandas as pd
-from utils import calculate_freight,load_nk_data
-
-# Daten laden
-dsv_data = pd.read_excel("dsv.xlsx", sheet_name=None)
-dachser_data = pd.read_excel("dachser.xlsx", sheet_name=None)
-gwk_dsv = pd.read_excel("dsv.xlsx", sheet_name="GWK")
-gwk_dachser = pd.read_excel("dachser.xlsx", sheet_name="GWK")
-zonen = pd.read_excel("dsv.xlsx", sheet_name="Zonen")
-zustelloptionen, nebendaten = load_nk_data()
 
 st.title("Frachtenrechner für LKW-Transporte")
 
-# Auswahlfelder
-länder = sorted(set(dachser_data.keys()).union({"DE"}))
-land = st.selectbox("Land", länder)
-plz = st.text_input("PLZ (2-stellig) / GB Buchstaben (1 oder e -stellig)", max_chars=2)
+land = st.selectbox("Land", ["DE", "AT", "CH", "FR", "GB"])
+plz = st.text_input("PLZ (2-stellig)", max_chars=2)
 gewicht = st.number_input("Gewicht (kg)", min_value=1, step=1)
 
 if st.button("Berechnen"):
-    tariftyp = "Dachser" if land != "DE" else "DSV"
-
-    # England-Spezialfall: Mapping gegen zweite Spalte
-    zone = None
-    if land == "GB":
-        if "PLZ_2" in zonen.columns and "GB" in zonen.columns:
-            plz_upper = plz.upper().strip()
-            row = zonen[zonen["PLZ_2"].astype(str).str.upper() == plz_upper]
-            if not row.empty:
-                zone = row["GB"].values[0]
+    if plz and len(plz) == 2:
+        result = calculate_freight(land, plz, gewicht)
+        st.markdown(f"**Frachtkosten:** {result['rate']}")
+        st.markdown(f"**Verwendeter Tariftyp:** {result['type']}")
     else:
-        if "PLZ_2" in zonen.columns and land in zonen.columns:
-            row = zonen[zonen["PLZ_2"].astype(str) == plz]
-            if not row.empty:
-                zone = row[land].values[0]
+        st.error("Bitte eine gültige 2-stellige PLZ eingeben.")
 
-    if not zone:
-        st.markdown(f"**Frachtkosten:** Keine Zone gefunden für PLZ {plz}")
-        st.markdown(f"**Verwendeter Tariftyp:** {tariftyp}")
-    else:
-        # Tarife und Gewichtsstufen ermitteln
-        if tariftyp == "DSV":
-            result = calculate_freight(dsv_data, gwk_dsv, land, zone, gewicht)
-        else:
-            result = calculate_freight(dachser_data, gwk_dachser, land, zone, gewicht)
+# Zusatzdaten direkt aus Hauptverzeichnis laden
+@st.cache_data
+def load_nk_data():
+    df1 = pd.read_excel("nk.xlsx", sheet_name=0)
+    df2 = pd.read_excel("nk.xlsx", sheet_name=1)
+    return df1, df2
 
-        if isinstance(result, str):
-            st.markdown(f"**Frachtkosten:** {result}")
-        else:
-            st.markdown(f"**Frachtkosten:** {result['rate']} €")
-        st.markdown(f"**Verwendeter Tariftyp:** {result['type']} ({tariftyp})")
+df_zustell, df_neben = load_nk_data()
 
-        # Zustelloptionen
-        if not zustelloptionen.empty:
-            zustell = zustelloptionen[zustelloptionen["Land"] == land]
-            if not zustell.empty:
-                st.subheader("Zustelloptionen")
-                st.dataframe(zustell[["Zustelloption", "Kosten", "Bemerkung"]])
+# Filter nach Land
+zustell_filtered = df_zustell[df_zustell["Land"] == land].copy()
+neben_filtered = df_neben[df_neben["Land"] == land].copy()
 
-        # Sonstige Nebenkosten
-        if not nebendaten.empty:
-            st.subheader("Sonstige Nebenkosten")
-            anzeige = nebendaten.copy()
-            if "Kosten" in anzeige.columns:
-                anzeige["Kosten"] = anzeige["Kosten"].apply(
-                    lambda x: f"{x:.2f} €" if isinstance(x, (int, float)) else x
-                )
-            st.dataframe(anzeige[["sonstige Nebenkosten", "Kosten", "Bemerkung"]])
+# Formatierung der Kosten-Spalten als Euro
+if "Kosten" in zustell_filtered.columns:
+    zustell_filtered["Kosten"] = zustell_filtered["Kosten"].apply(
+        lambda x: f"{x:.2f} €" if pd.notna(x) and isinstance(x, (float, int)) else x
+    )
+if "Kosten" in neben_filtered.columns:
+    neben_filtered["Kosten"] = neben_filtered["Kosten"].apply(
+        lambda x: f"{x:.2f} €" if pd.notna(x) and isinstance(x, (float, int)) else x
+    )
+
+st.subheader("Zustelloptionen")
+if not zustell_filtered.empty:
+    st.table(zustell_filtered[["Zustelloption", "Kosten", "Bemerkung"]].reset_index(drop=True))
+else:
+    st.markdown("_Keine Daten verfügbar._")
+
+st.subheader("Sonstige Nebenkosten")
+if not neben_filtered.empty:
+    st.table(neben_filtered[["sonstige Nebenkosten", "Kosten", "Bemerkung"]].reset_index(drop=True))
+else:
+    st.markdown("_Keine Daten verfügbar._")
